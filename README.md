@@ -63,7 +63,7 @@ Photos will be inserted here later
 
 ### OLED Screen Example
 
-<img width="1228" height="813" alt="image" src="https://github.com/user-attachments/assets/9131c399-30c4-4790-96cd-b4368a2e7b04" />
+<img width="450" height="300" alt="image" src="https://github.com/user-attachments/assets/9131c399-30c4-4790-96cd-b4368a2e7b04" />
 
 ### Internal Electronics
 
