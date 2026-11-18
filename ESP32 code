@@ -1,0 +1,370 @@
+/*
+ * ESP32 Bluetooth Hi-Fi Receiver
+ *
+ * Streams audio from a Bluetooth source using A2DP and outputs
+ * it through an external I2S DAC. Song metadata is displayed on
+ * a 128x64 SH1106 OLED display, including:
+ *
+ * - Song title
+ * - Artist name
+ * - Playback progress bar
+ * - Elapsed and total track time
+ *
+ * Long titles and artist names automatically scroll when they
+ * exceed the display width.
+ *
+ * Hardware:
+ * - ESP32
+ * - SH1106 OLED Display
+ * - I2S DAC
+ *
+ * Author: Niven Teague
+ */
+
+#include "AudioTools.h"
+#include "BluetoothA2DPSink.h"
+
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH110X.h>
+
+//fonts used by oled
+#include "FreeSerifBoldItalic12pt7b.h"
+#include "Picopixel.h"
+#include "FreeSerif9pt7b.h"
+
+
+// ---------- OLED ----------
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+#define OLED_SDA 16
+#define OLED_SCL 17
+
+Adafruit_SH1106G display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+
+// ---------- I2S DAC ----------
+
+I2SStream i2s;
+BluetoothA2DPSink a2dp_sink(i2s);
+
+
+// ---------- MUSIC DATA ----------
+
+String title = "Connect";
+String oldTitle = "Connect";
+String artist = "to play";
+
+String position = "";
+String runTime = "";
+
+uint32_t length = 0;
+uint32_t startTime = 0;
+
+
+// ---------- SCROLLING ----------
+// Variables used to control scrolling text when metadata exceeds screen width
+
+int sharedScrollX = 3;
+int titleScrollX = 3;
+int artistScrollX = 3;
+
+uint32_t lastScrollTime = 0;
+
+
+// Text measurement variables
+int16_t titleX1, titleY1;
+int16_t artistX1, artistY1;
+
+uint16_t titleWidth, titleHeight;
+uint16_t artistWidth, artistHeight;
+
+
+// ---------- SETUP ----------
+void setup() {
+  Serial.begin(115200);
+
+  // ---------- OLED ----------
+  Wire.begin(OLED_SDA, OLED_SCL);
+
+  if (!display.begin(0x3C, true)) {
+    Serial.println("OLED not found!");
+    while (true);
+  }
+
+  display.clearDisplay();
+  display.display();
+
+  display.setTextColor(SH110X_WHITE);
+
+  delay(1500);
+
+
+  // ---------- I2S DAC ----------
+  auto config = i2s.defaultConfig(TX_MODE);
+
+  config.pin_bck = 14;
+  config.pin_ws = 13;
+  config.pin_data = 12;
+
+  i2s.begin(config);
+
+
+  // ---------- BLUETOOTH METADATA ----------
+  // Request title, artist and track duration metadata from the Bluetooth source 
+  a2dp_sink.set_avrc_metadata_attribute_mask(
+    ESP_AVRC_MD_ATTR_TITLE |
+    ESP_AVRC_MD_ATTR_ARTIST |
+    ESP_AVRC_MD_ATTR_PLAYING_TIME
+  );
+  a2dp_sink.set_avrc_metadata_callback(avrc_metadata_callback);
+
+
+  // ---------- START BLUETOOTH ----------
+  a2dp_sink.start("Hi-Fi ESP32"); // change to what you want your device to appear as
+
+}
+
+
+
+// ---------- MAIN LOOP ----------
+void loop() {
+
+  // ---------- DETECT NEW SONG ----------
+  // detects new song by seeing if title has changed
+  // so it only calculates variables like song length once per song
+
+  if (title != oldTitle && title.length() > 0) {
+    oldTitle = title;
+    startTime = millis();
+    runTime = convertTime(length);
+
+    // Reset scrolling
+    sharedScrollX = 3;
+    titleScrollX = 3;
+    artistScrollX = 3;
+    lastScrollTime = millis();
+
+    //title
+    display.setFont(&FreeSerifBoldItalic12pt7b);
+    display.getTextBounds(title, 0, 17, &titleX1, &titleY1, &titleWidth, &titleHeight);
+
+    //artist
+    display.setFont(&FreeSerif9pt7b);
+    display.getTextBounds(artist, 0, 35, &artistX1, &artistY1, &artistWidth, &artistHeight);
+  }
+
+
+  //calculation of time into song for scroll bar 
+  position = convertTime(millis() - startTime);
+
+  // ---------- SERIAL MONITOR ----------
+  // for debugging without screen
+  Serial.println();
+  Serial.println(title);
+  Serial.println(artist);
+
+  Serial.print(position);
+  Serial.print("/");
+  Serial.println(runTime);
+
+
+  // ---------- OLED ----------
+  display.clearDisplay();
+  display.setTextWrap(false);
+
+
+  // ---------- DETERMINE SCROLL MODE ----------
+  // if artist name or song title doesn't they scroll if they both dont they scroll together 
+  // for a cleaner look
+
+  bool titleTooLong = titleWidth > 122;
+  bool artistTooLong = artistWidth > 122;
+
+
+  // ---------- UPDATE SCROLLING VARIABLES----------
+  if (millis() - lastScrollTime > 50) {
+
+    lastScrollTime = millis();
+
+
+    // BOTH TOO LONG
+    // Use the same position for both
+    if (titleTooLong && artistTooLong) {
+      sharedScrollX--;
+      if (sharedScrollX < -(int)max(titleWidth, artistWidth)) {
+        sharedScrollX = 128;
+      }
+    }
+
+
+    // ONLY TITLE TOO LONG
+    else if (titleTooLong) {
+      titleScrollX--;
+      if (titleScrollX < -(int)titleWidth) {
+        titleScrollX = 128;
+      }
+    }
+
+
+    // ONLY ARTIST TOO LONG
+    else if (artistTooLong) {
+      artistScrollX--;
+      if (artistScrollX < -(int)artistWidth) {
+        artistScrollX = 128;
+      }
+    }
+  }
+
+
+  // ---------- SONG TITLE ----------
+  display.setFont(&FreeSerifBoldItalic12pt7b);
+
+  if (titleTooLong) {
+
+    if (artistTooLong) {
+      // Both scrolling together
+      display.setCursor(sharedScrollX, 17);
+    }
+    else {
+      // Only title scrolling
+      display.setCursor(titleScrollX, 17);
+    }
+
+    display.print(title);
+  }
+
+  else {
+    display.setCursor(3,17);
+    display.print(title);
+  }
+
+
+  // ---------- ARTIST ----------
+  display.setFont(&FreeSerif9pt7b);
+
+  if (artistTooLong) {
+    if (titleTooLong) {
+      // Both scrolling together
+      display.setCursor(sharedScrollX, 35);
+    }
+    else {
+      // Only artist scrolling
+      display.setCursor(artistScrollX, 35);
+    }
+
+    display.print(artist);
+  }
+
+  else {
+
+    display.setCursor(3, 35);
+    display.print(artist);
+  }
+
+
+  // ---------- PROGRESS BAR ----------
+  // draws boarder and fills proportionally to time left in song
+  display.drawRect(3, 44, 122, 9, SH110X_WHITE);
+  int barWidth = 0;
+
+  if (length > 0) {
+    barWidth = map(millis() - startTime, 0, length, 0, 120);
+    barWidth = constrain(barWidth, 0, 120);
+  }
+
+
+  if (barWidth > 0) {
+    display.fillRect(4, 45, barWidth, 7, SH110X_WHITE);
+  }
+
+
+  // ---------- TIME ----------
+  display.setFont(&Picopixel);
+  display.setCursor(96, 60);
+
+  display.print(position);
+  display.print("/");
+  display.print(runTime);
+
+
+  // ---------- SEND TO OLED ----------
+  display.display();
+  delay(20);
+}
+
+
+// ---------- BLUETOOTH METADATA ----------
+// extracts and edits metadata for display removing info like remaster dates etc.
+void avrc_metadata_callback(uint8_t id, const uint8_t *text) {
+
+  if (text == nullptr) {
+    return;
+  }
+
+
+  switch (id) {
+
+    // ---------- TITLE ----------
+
+    case ESP_AVRC_MD_ATTR_TITLE:{
+      
+      // removes unecessary text like edition or remaster of song
+      title = (const char*)text;
+      int bracketStart = title.indexOf('(');
+      if (bracketStart >= 0) {
+        title = title.substring(0, bracketStart);
+        title.trim();
+      }
+      int dashStart = title.indexOf('-');
+      if (dashStart >= 0) {
+        title = title.substring(0, dashStart);
+        title.trim();
+      }
+      break;
+    }
+
+
+    // ---------- ARTIST ----------
+
+    case ESP_AVRC_MD_ATTR_ARTIST:
+
+      artist = (const char*)text;
+
+      // Remove Spotify's extra text
+      artist.replace("Video Available", "");
+      artist.trim();
+
+      // Re-measure artist immediately
+      display.setFont(&FreeSerif9pt7b);
+
+      display.getTextBounds(artist, 0, 35, &artistX1, &artistY1, &artistWidth, &artistHeight);
+      break;
+
+    // ---------- PLAYING TIME ----------
+
+    case ESP_AVRC_MD_ATTR_PLAYING_TIME:
+
+      length = String((const char*)text).toInt();
+      break;
+  }
+}
+
+
+// ---------- TIME CONVERSION ----------
+// coverts millis into mm:ss format 
+String convertTime(uint32_t mil) {
+
+  uint32_t seconds = mil / 1000;
+  uint32_t mins = seconds / 60;
+  uint32_t secs = seconds % 60;
+  String time = String(mins) + ":";
+  if (secs < 10) {
+    time += "0";
+  }
+  time += String(secs);
+
+  return time;
+}
