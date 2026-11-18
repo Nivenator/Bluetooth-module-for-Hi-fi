@@ -2,6 +2,8 @@
 
 A portable Bluetooth Hi\-Fi receiver built using an ESP32, external I2S DAC and SH1106 OLED display. The device streams audio from a phone, laptop or tablet via Bluetooth A2DP whilst displaying track metadata, playback progress and song timing information on a dedicated OLED interface.
 
+*This is a working prototype the code shell design will be improved
+
 ## Features
 
 - Bluetooth A2DP audio streaming
@@ -21,7 +23,7 @@ A portable Bluetooth Hi\-Fi receiver built using an ESP32, external I2S DAC and 
 - SH1106 128×64 OLED Display
 - Adafruit PCM5102 I2S DAC 
 - 5V USBc power cable
-- Connecting Wires
+- Jumper cables 
 
 ## Software and Libraries
 
@@ -59,9 +61,9 @@ Long metadata fields automatically scroll to ensure all information remains visi
 
 Photos will be inserted here later
 
-### OLED Interface
+### OLED Screen Example
 
-Photos will be inserted here later
+<img width="1228" height="813" alt="image" src="https://github.com/user-attachments/assets/9131c399-30c4-4790-96cd-b4368a2e7b04" />
 
 ### Internal Electronics
 
@@ -71,7 +73,7 @@ Photos will be inserted here later
 
 Potential future developments include:
 
-- Rotary encoder volume control
+- Rotary encoder volume and menu control
 - Added features such as an alarm mode
 - Playback controls (play/pause, next, previous)
 - Battery\-powered operation
